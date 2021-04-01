@@ -20,11 +20,9 @@ import kotlinx.coroutines.withContext
 import kotlinx.io.core.discardExact
 import kotlinx.io.core.readBytes
 import kotlinx.serialization.json.*
-import net.mamoe.kjbb.JvmBlockingBridge
 import net.mamoe.mirai.*
 import net.mamoe.mirai.contact.*
 import net.mamoe.mirai.data.*
-import net.mamoe.mirai.event.broadcast
 import net.mamoe.mirai.event.events.*
 import net.mamoe.mirai.internal.contact.*
 import net.mamoe.mirai.internal.contact.info.FriendInfoImpl
@@ -32,6 +30,7 @@ import net.mamoe.mirai.internal.contact.info.MemberInfoImpl
 import net.mamoe.mirai.internal.message.*
 import net.mamoe.mirai.internal.network.highway.*
 import net.mamoe.mirai.internal.network.protocol.data.jce.SvcDevLoginInfo
+import net.mamoe.mirai.internal.network.protocol.data.proto.ImMsgBody
 import net.mamoe.mirai.internal.network.protocol.data.proto.LongMsg
 import net.mamoe.mirai.internal.network.protocol.data.proto.MsgTransmit
 import net.mamoe.mirai.internal.network.protocol.packet.chat.*
@@ -40,6 +39,7 @@ import net.mamoe.mirai.internal.network.protocol.packet.list.FriendList
 import net.mamoe.mirai.internal.network.protocol.packet.login.StatSvc
 import net.mamoe.mirai.internal.network.protocol.packet.sendAndExpect
 import net.mamoe.mirai.internal.network.protocol.packet.summarycard.SummaryCard
+import net.mamoe.mirai.internal.utils.broadcastWithBot
 import net.mamoe.mirai.internal.utils.crypto.TEA
 import net.mamoe.mirai.internal.utils.io.serialization.loadAs
 import net.mamoe.mirai.internal.utils.io.serialization.toByteArray
@@ -66,6 +66,7 @@ internal open class MiraiImpl : IMirai, LowLevelApiAccessor {
             MessageSerializers.registerSerializer(OnlineGroupImageImpl::class, OnlineGroupImageImpl.serializer())
 
             MessageSerializers.registerSerializer(MarketFaceImpl::class, MarketFaceImpl.serializer())
+            MessageSerializers.registerSerializer(FileMessageImpl::class, FileMessageImpl.serializer())
 
             // MessageSource
 
@@ -109,6 +110,10 @@ internal open class MiraiImpl : IMirai, LowLevelApiAccessor {
                 OfflineMessageSourceImplData::class,
                 OfflineMessageSourceImplData.serializer()
             )
+            MessageSerializers.registerSerializer(
+                UnsupportedMessageImpl::class,
+                UnsupportedMessageImpl.serializer()
+            )
         }
     }
 
@@ -147,7 +152,7 @@ internal open class MiraiImpl : IMirai, LowLevelApiAccessor {
         )
 
         event.bot.getFriend(event.fromId)?.let { friend ->
-            FriendAddEvent(friend).broadcast()
+            FriendAddEvent(friend).broadcastWithBot(event.bot)
         }
     }
 
@@ -194,14 +199,6 @@ internal open class MiraiImpl : IMirai, LowLevelApiAccessor {
             accept = true,
             blackList = false
         )
-
-        event.group?.getMember(event.fromId)?.let { member ->
-            if (event.invitor != null) {
-                MemberJoinEvent.Invite(member, event.invitor!!).broadcast()
-            } else {
-                MemberJoinEvent.Active(member).broadcast()
-            }
-        }
     }
 
     @Suppress("DuplicatedCode")
@@ -719,7 +716,8 @@ internal open class MiraiImpl : IMirai, LowLevelApiAccessor {
         val data = message.calculateValidationData(
             sequenceId = sequenceId,
             random = Random.nextInt().absoluteValue,
-            sendMessageHandler
+            sendMessageHandler,
+            isLong,
         )
 
         val response = network.run {
@@ -794,6 +792,9 @@ internal open class MiraiImpl : IMirai, LowLevelApiAccessor {
                 accept = accept,
                 blackList = blackList
             ).sendWithoutExpect()
+
+            if (!accept) return@apply
+
             @Suppress("INVISIBLE_MEMBER", "INVISIBLE_REFERENCE")
             bot.friends.delegate.add(newFriend(bot, FriendInfoImpl(fromId, fromNick, "")))
         }
@@ -844,20 +845,7 @@ internal open class MiraiImpl : IMirai, LowLevelApiAccessor {
                 message = message
             ).sendWithoutExpect()
         }
-
-        if (accept ?: return@run)
-            groups[groupId]?.run {
-                members.delegate.add(
-                    newMember(
-                        MemberInfoImpl(
-                            uin = fromId,
-                            nick = fromNick,
-                            permission = MemberPermission.MEMBER,
-                            "", "", "", 0, null
-                        )
-                    ).cast()
-                )
-            }
+        // Add member in MsgOnlinePush.PbPushMsg
     }
 
     @OptIn(ExperimentalStdlibApi::class)
@@ -915,6 +903,13 @@ internal open class MiraiImpl : IMirai, LowLevelApiAccessor {
                 throw IllegalArgumentException("Illegal imageId: $imageId. $ILLEGAL_IMAGE_ID_EXCEPTION_MESSAGE")
         }
     }
+
+    override fun createFileMessage(id: String, internalId: Int, name: String, size: Long): FileMessage {
+        return FileMessageImpl(id, internalId, name, size)
+    }
+
+    override fun createUnsupportedMessage(struct: ByteArray): UnsupportedMessage =
+        UnsupportedMessageImpl(struct.loadAs(ImMsgBody.Elem.serializer()))
 
     @Suppress("DEPRECATION", "OverridingDeprecatedMember")
     override suspend fun queryImageUrl(bot: Bot, image: Image): String = when (image) {

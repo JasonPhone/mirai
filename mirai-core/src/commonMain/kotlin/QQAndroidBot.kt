@@ -135,6 +135,9 @@ internal class QQAndroidBot constructor(
     override suspend fun relogin(cause: Throwable?) {
         bdhSyncer.loadFromCache()
         client.useNextServers { host, port ->
+            // net error in login
+            // network is dead therefore can't send any packet
+            reinitializeNetwork()
             network.closeEverythingAndRelogin(host, port, cause, 0)
         }
     }
@@ -205,7 +208,7 @@ internal fun RichMessage.Key.longMessage(brief: String, resId: String, timeSecon
                     </item>
                     <source name="聊天记录" icon="" action="" appid="-1"/>
                 </msg>
-            """.trimIndent()
+            """.trimIndent().trim()
 
     return LongMessageInternal(template, resId)
 }
@@ -217,7 +220,7 @@ internal fun RichMessage.Key.forwardMessage(
     forwardMessage: ForwardMessage,
 ): ForwardMessageInternal = with(forwardMessage) {
     val template = """
-        <?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
+        <?xml version="1.0" encoding="utf-8"?>
         <msg serviceID="35" templateID="1" action="viewMultiMsg" brief="${brief.take(30)}"
              m_resid="$resId" m_fileName="$timeSeconds"
              tSum="3" sourceMsgId="0" url="" flag="3" adverSign="0" multiMsgFlag="0">
@@ -242,6 +245,6 @@ internal fun RichMessage.Key.forwardMessage(
             </item>
             <source name="${source.take(50)}" icon="" action="" appid="-1"/>
         </msg>
-    """.trimIndent().replace("\n", " ")
+    """.trimIndent().replace("\n", " ").trim()
     return ForwardMessageInternal(template, resId)
 }

@@ -13,7 +13,6 @@ package net.mamoe.mirai.internal.network.protocol.packet.chat.receive
 
 import kotlinx.io.core.ByteReadPacket
 import net.mamoe.mirai.contact.Member
-import net.mamoe.mirai.contact.MemberPermission
 import net.mamoe.mirai.contact.nameCardOrNick
 import net.mamoe.mirai.event.AbstractEvent
 import net.mamoe.mirai.event.Event
@@ -32,7 +31,7 @@ import net.mamoe.mirai.internal.network.protocol.data.proto.MsgComm
 import net.mamoe.mirai.internal.network.protocol.data.proto.MsgOnlinePush
 import net.mamoe.mirai.internal.network.protocol.data.proto.Oidb0x8fc
 import net.mamoe.mirai.internal.network.protocol.packet.IncomingPacketFactory
-import net.mamoe.mirai.internal.utils._miraiContentToString
+import net.mamoe.mirai.internal.utils.broadcastWithBot
 import net.mamoe.mirai.internal.utils.io.serialization.loadAs
 import net.mamoe.mirai.internal.utils.io.serialization.readProtoBuf
 import net.mamoe.mirai.message.data.MessageSourceKind.GROUP
@@ -69,7 +68,9 @@ internal object OnlinePushPbPushGroupMsg : IncomingPacketFactory<Packet?>("Onlin
             val messageRandom = pbPushMsg.msg.msgBody.richText.attr?.random ?: return null
 
             if (bot.client.syncingController.pendingGroupMessageReceiptCacheList.contains { it.messageRandom == messageRandom }
-                || msgHead.fromAppid == 3116) {
+                || msgHead.fromAppid == 3116 || msgHead.fromAppid == 2021) {
+                // 3116=group music share
+                // 2021=group file
                 // message sent by bot
                 return SendGroupMessageReceipt(
                     messageRandom,
@@ -105,7 +106,7 @@ internal object OnlinePushPbPushGroupMsg : IncomingPacketFactory<Packet?>("Onlin
         val name: String
 
         if (anonymous != null) { // anonymous member
-            sender = group.newAnonymous(anonymous.anonNick.encodeToString(), anonymous.anonId.encodeToBase64())
+            sender = group.newAnonymous(anonymous.anonNick.encodeToString(), anonymous.anonId.encodeBase64())
             name = sender.nameCard
         } else { // normal member chat
             sender = group[msgHead.fromUin] as NormalMemberImpl? ?: kotlin.run {
@@ -135,7 +136,7 @@ internal object OnlinePushPbPushGroupMsg : IncomingPacketFactory<Packet?>("Onlin
                 senderName = name,
                 sender = sender,
                 message = msgs.map { it.msg }.toMessageChainOnline(bot, group.id, GROUP).refine(group),
-                permission = findMemberPermission(extraInfo?.flags ?: 0, sender, bot),
+                permission = sender.permission,
                 time = msgHead.msgTime
             )
         }
@@ -145,21 +146,7 @@ internal object OnlinePushPbPushGroupMsg : IncomingPacketFactory<Packet?>("Onlin
         val currentNameCard = sender.nameCard
         if (sender is NormalMemberImpl && name != currentNameCard) {
             sender._nameCard = name
-            MemberCardChangeEvent(currentNameCard, name, sender).broadcast()
-        }
-    }
-
-    private fun findMemberPermission(
-        flags: Int,
-        sender: Member,
-        bot: QQAndroidBot,
-    ) = when {
-        flags and 16 != 0 -> MemberPermission.ADMINISTRATOR
-        flags and 8 != 0 -> MemberPermission.OWNER
-        flags == 0 || flags == 1 -> MemberPermission.MEMBER
-        else -> {
-            bot.logger.warning { "判断群 ${sender.group.id} 的群员 ${sender.id} 的权限失败: ${flags._miraiContentToString()}. 请完整截图或复制此日志并确认其真实权限后发送给 mirai 维护者以帮助解决问题." }
-            sender.permission
+            MemberCardChangeEvent(currentNameCard, name, sender).broadcastWithBot(sender.bot)
         }
     }
 

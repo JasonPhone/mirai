@@ -22,9 +22,13 @@ import net.mamoe.mirai.Bot
 import net.mamoe.mirai.BotFactory
 import net.mamoe.mirai.event.events.BotOfflineEvent
 import java.io.File
+import java.io.InputStream
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.coroutines.coroutineContext
+import kotlin.time.Duration
+import kotlin.time.ExperimentalTime
+import kotlin.time.milliseconds
 
 /**
  * [Bot] 配置. 用于 [BotFactory.newBot]
@@ -274,8 +278,8 @@ public open class BotConfiguration { // open for Java
      *
      * - 默认打印到标准输出, 通过 [MiraiLogger.create]
      * - 忽略所有日志: [noBotLog]
-     * - 重定向到一个目录: `networkLoggerSupplier = { DirectoryLogger("Net ${it.id}") }`
-     * - 重定向到一个文件: `networkLoggerSupplier = { SingleFileLogger("Net ${it.id}") }`
+     * - 重定向到一个目录: `botLoggerSupplier = { DirectoryLogger("Bot ${it.id}") }`
+     * - 重定向到一个文件: `botLoggerSupplier = { SingleFileLogger("Bot ${it.id}") }`
      *
      * @see MiraiLogger
      */
@@ -383,7 +387,18 @@ public open class BotConfiguration { // open for Java
     //////////////////////////////////////////////////////////////////////////
 
     /**
-     * 缓存数据目录, 相对于 [workingDir]
+     * 缓存数据目录, 相对于 [workingDir].
+     *
+     * 缓存目录保存的内容均属于不稳定的 Mirai 内部数据, 请不要手动修改它们. 清空缓存不会影响功能. 只会导致一些操作如读取全部群列表要重新进行.
+     * 默认启用的缓存可以加快登录过程.
+     *
+     * 注意: 这个目录只存储能在 [BotConfiguration] 配置的内容, 即包含:
+     * - 联系人列表
+     * - 登录服务器列表
+     * - 资源服务秘钥
+     *
+     * 其他内容如通过 [InputStream] 发送图片时的缓存使用 [FileCacheStrategy], 默认使用系统临时文件且会在关闭时删除文件.
+     *
      * @since 2.4
      */
     public var cacheDir: File = File("cache")
@@ -396,6 +411,9 @@ public open class BotConfiguration { // open for Java
 
     /**
      * 联系人信息缓存配置
+     * @see contactListCache
+     * @see enableContactCache
+     * @see disableContactCache
      * @since 2.4
      */
     public class ContactListCache {
@@ -405,32 +423,39 @@ public open class BotConfiguration { // open for Java
         public var saveIntervalMillis: Long = 60_000
 
         /**
-         * 开启好友列表缓存
+         * 在有修改时自动保存间隔. 默认 60 秒. 在每次登录完成后有修改时都会立即保存一次.
          */
-        public var friendListCacheEnabled: Boolean = true
+        @ExperimentalTime
+        public inline var saveInterval: Duration
+            @JvmSynthetic inline get() = saveIntervalMillis.milliseconds
+            @JvmSynthetic inline set(v) {
+                saveIntervalMillis = v.toLongMilliseconds()
+            }
 
         /**
-         * 开启好友列表缓存
+         * 开启好友列表缓存.
          */
-        public var groupMemberListCacheEnabled: Boolean = true
+        public var friendListCacheEnabled: Boolean = false
+
+        /**
+         * 开启群成员列表缓存.
+         */
+        public var groupMemberListCacheEnabled: Boolean = false
     }
 
     /**
-     * 禁用好友列表缓存.
+     * 配置 [ContactListCache]
+     * ```
+     * contactListCache {
+     *     saveIntervalMillis = 30_000
+     *     friendListCacheEnabled = true
+     * }
+     * ```
      * @since 2.4
      */
-    @ConfigurationDsl
-    public fun disableFriendListCache() {
-        contactListCache.friendListCacheEnabled = false
-    }
-
-    /**
-     * 禁用群成员列表缓存.
-     * @since 2.4
-     */
-    @ConfigurationDsl
-    public fun disableGroupMemberListCache() {
-        contactListCache.groupMemberListCacheEnabled = false
+    @JvmSynthetic
+    public inline fun contactListCache(action: ContactListCache.() -> Unit) {
+        action.invoke(this.contactListCache)
     }
 
     /**
@@ -438,15 +463,26 @@ public open class BotConfiguration { // open for Java
      * @since 2.4
      */
     @ConfigurationDsl
-    public fun disableContactCaches() {
+    public fun disableContactCache() {
         contactListCache.friendListCacheEnabled = false
         contactListCache.groupMemberListCacheEnabled = false
+    }
+
+    /**
+     * 启用好友列表和群成员列表的缓存.
+     * @since 2.4
+     */
+    @ConfigurationDsl
+    public fun enableContactCache() {
+        contactListCache.friendListCacheEnabled = true
+        contactListCache.groupMemberListCacheEnabled = true
     }
 
     ///////////////////////////////////////////////////////////////////////////
     // Misc
     ///////////////////////////////////////////////////////////////////////////
 
+    @Suppress("DuplicatedCode")
     public fun copy(): BotConfiguration {
         return BotConfiguration().also { new ->
             // To structural order

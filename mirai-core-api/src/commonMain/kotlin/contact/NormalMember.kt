@@ -141,12 +141,20 @@ public interface NormalMember : Member {
 
 /**
  * 获取非空群名片或昵称.
- *
- * @return 当 [User] 为 [Member] 时返回 [Member.nameCardOrNick]
- *
- * 否则返回 [Member.nick]
+ * @return 当 [User] 为 [NormalMember] 时返回 [Member.nameCardOrNick], 否则返回 [Member.nick]
  */
 public val User.nameCardOrNick: String
+    get() = when (this) {
+        is NormalMember -> this.nameCardOrNick
+        else -> this.nick
+    }
+
+/**
+ * 获取非空群名片或昵称.
+ * @return 当 [UserOrBot] 为 [NormalMember] 时返回 [Member.nameCardOrNick], 否则返回 [Member.nick]
+ * @since 2.6
+ */
+public val UserOrBot.nameCardOrNick: String
     get() = when (this) {
         is NormalMember -> this.nameCardOrNick
         else -> this.nick
@@ -166,4 +174,11 @@ public suspend inline fun NormalMember.mute(duration: Duration) {
     require(duration.inDays <= 30) { "duration must be at most 1 month" }
     require(duration.inSeconds > 0) { "duration must be greater than 0 second" }
     this.mute(duration.inSeconds.toInt())
+}
+
+@Suppress("unused")
+@JvmName("mute-fcu0wV4")
+@Deprecated("For binary compatibility", level = DeprecationLevel.HIDDEN)
+public suspend inline fun NormalMember.mute00(duration: Duration) {
+    return mute(duration)
 }

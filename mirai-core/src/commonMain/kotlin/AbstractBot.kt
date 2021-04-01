@@ -75,6 +75,13 @@ internal abstract class AbstractBot<N : BotNetworkHandler> constructor(
     @Suppress("PropertyName")
     internal lateinit var _network: N
 
+    suspend fun reinitializeNetwork() {
+        if (::_network.isInitialized) {
+            _network.closeAndJoin(null)
+        }
+        _network = createNetworkHandler(coroutineContext)
+    }
+
     internal var _isConnecting: Boolean = false
 
     override val isOnline: Boolean get() = _network.areYouOk()
@@ -219,7 +226,7 @@ internal abstract class AbstractBot<N : BotNetworkHandler> constructor(
 
         private suspend fun doRelogin() {
             while (true) {
-                _network = createNetworkHandler(coroutineContext)
+                reinitializeNetwork()
                 try {
                     _isConnecting = true
                     @OptIn(ThisApiMustBeUsedInWithConnectionLockBlock::class)
@@ -288,6 +295,17 @@ internal abstract class AbstractBot<N : BotNetworkHandler> constructor(
                 @OptIn(ThisApiMustBeUsedInWithConnectionLockBlock::class)
                 reinitializeNetworkHandler(null)
             }
+
+            // https://github.com/mamoe/mirai/issues/1019
+            kotlin.runCatching {
+                bot.nick
+            }.onFailure {
+                bot.asQQAndroidBot().nick = MiraiImpl.queryProfile(bot, bot.id).nickname
+                if (bot.nick.isBlank()) {
+                    logger.warning { "Unable to fetch nickname of bot." }
+                }
+            }
+
             logger.info { "Login successful" }
         }
     }
